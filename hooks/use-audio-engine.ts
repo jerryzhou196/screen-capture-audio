@@ -1,0 +1,379 @@
+"use client"
+
+import { useCallback, useRef, useState } from "react"
+
+export type AudioEngineState = {
+  isCapturing: boolean
+  isRecording: boolean
+  isPlayingBack: boolean
+  reverbMix: number
+  bassGain: number
+  bassEnabled: boolean
+  speed: number
+  preservePitch: boolean
+  waveformData: Float32Array | null
+  recordingBlobUrl: string | null
+}
+
+export function useAudioEngine() {
+  const [state, setState] = useState<AudioEngineState>({
+    isCapturing: false,
+    isRecording: false,
+    isPlayingBack: false,
+    reverbMix: 0.35,
+    bassGain: 8,
+    bassEnabled: false,
+    speed: 1,
+    preservePitch: true,
+    waveformData: null,
+    recordingBlobUrl: null,
+  })
+
+  const acRef = useRef<AudioContext | null>(null)
+  const mediaStreamRef = useRef<MediaStream | null>(null)
+  const srcNodeRef = useRef<MediaStreamAudioSourceNode | null>(null)
+  const convolverRef = useRef<ConvolverNode | null>(null)
+  const dryGainRef = useRef<GainNode | null>(null)
+  const wetGainRef = useRef<GainNode | null>(null)
+  const bassFilterDryRef = useRef<BiquadFilterNode | null>(null)
+  const bassFilterWetRef = useRef<BiquadFilterNode | null>(null)
+  const outGainRef = useRef<GainNode | null>(null)
+  const destRef = useRef<MediaStreamAudioDestinationNode | null>(null)
+  const monitorRef = useRef<HTMLAudioElement | null>(null)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const chunksRef = useRef<Blob[]>([])
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const animFrameRef = useRef<number>(0)
+  const playbackAudioRef = useRef<HTMLAudioElement | null>(null)
+
+  function makeImpulseResponse(ac: AudioContext, seconds: number, decay: number) {
+    const rate = ac.sampleRate
+    const length = Math.floor(rate * seconds)
+    const ir = ac.createBuffer(2, length, rate)
+    for (let ch = 0; ch < ir.numberOfChannels; ch++) {
+      const data = ir.getChannelData(ch)
+      for (let i = 0; i < length; i++) {
+        const t = i / length
+        const env = Math.pow(1 - t, decay)
+        data[i] = (Math.random() * 2 - 1) * env
+      }
+    }
+    return ir
+  }
+
+  function makeBassFilter(ac: AudioContext) {
+    const f = ac.createBiquadFilter()
+    f.type = "lowshelf"
+    f.frequency.value = 120
+    f.Q.value = 0.707
+    f.gain.value = 0
+    return f
+  }
+
+  const updateWaveform = useCallback(() => {
+    const analyser = analyserRef.current
+    if (!analyser) return
+    const bufferLength = analyser.frequencyBinCount
+    const dataArray = new Float32Array(bufferLength)
+    analyser.getFloatTimeDomainData(dataArray)
+    setState((prev) => ({ ...prev, waveformData: new Float32Array(dataArray) }))
+    animFrameRef.current = requestAnimationFrame(updateWaveform)
+  }, [])
+
+  const startCapture = useCallback(async () => {
+    const ac = new AudioContext()
+    acRef.current = ac
+
+    const mediaStream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        suppressLocalAudioPlayback: true,
+      },
+    })
+
+    for (const t of mediaStream.getVideoTracks()) t.stop()
+
+    const audioTracks = mediaStream.getAudioTracks()
+    if (!audioTracks.length) {
+      throw new Error("No audio track captured. Re-try and ensure 'Share tab audio' is enabled.")
+    }
+
+    mediaStreamRef.current = mediaStream
+    const srcNode = ac.createMediaStreamSource(mediaStream)
+    srcNodeRef.current = srcNode
+
+    // Build audio graph
+    const convolver = ac.createConvolver()
+    const dryGain = ac.createGain()
+    const wetGain = ac.createGain()
+    const outGain = ac.createGain()
+    outGain.gain.value = 0.85
+
+    convolver.buffer = makeImpulseResponse(ac, 1.6, 2.2)
+
+    const bassFilterDry = makeBassFilter(ac)
+    const bassFilterWet = makeBassFilter(ac)
+
+    // Analyser for waveform
+    const analyser = ac.createAnalyser()
+    analyser.fftSize = 2048
+
+    srcNode.connect(dryGain)
+    srcNode.connect(convolver)
+    convolver.connect(wetGain)
+    dryGain.connect(bassFilterDry)
+    wetGain.connect(bassFilterWet)
+    bassFilterDry.connect(outGain)
+    bassFilterWet.connect(outGain)
+
+    outGain.connect(analyser)
+
+    const dest = ac.createMediaStreamDestination()
+    outGain.connect(dest)
+
+    convolverRef.current = convolver
+    dryGainRef.current = dryGain
+    wetGainRef.current = wetGain
+    bassFilterDryRef.current = bassFilterDry
+    bassFilterWetRef.current = bassFilterWet
+    outGainRef.current = outGain
+    destRef.current = dest
+    analyserRef.current = analyser
+
+    // Create hidden audio element for monitor
+    const monitor = new Audio()
+    monitor.srcObject = dest.stream
+    monitor.play().catch(() => {})
+    monitorRef.current = monitor
+
+    // Apply initial state
+    const wet = 0.35
+    dryGain.gain.value = 1 - wet
+    wetGain.gain.value = wet
+
+    // Listen for track end
+    audioTracks[0].addEventListener("ended", () => {
+      stopAll()
+    })
+
+    setState((prev) => ({ ...prev, isCapturing: true }))
+    updateWaveform()
+  }, [updateWaveform])
+
+  const stopAll = useCallback(() => {
+    cancelAnimationFrame(animFrameRef.current)
+
+    if (recorderRef.current && recorderRef.current.state !== "inactive") {
+      recorderRef.current.stop()
+    }
+
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((t) => t.stop())
+      mediaStreamRef.current = null
+    }
+
+    if (monitorRef.current) {
+      monitorRef.current.pause()
+      monitorRef.current.srcObject = null
+      monitorRef.current = null
+    }
+
+    if (acRef.current) {
+      acRef.current.close().catch(() => {})
+      acRef.current = null
+    }
+
+    srcNodeRef.current = null
+    convolverRef.current = null
+    dryGainRef.current = null
+    wetGainRef.current = null
+    bassFilterDryRef.current = null
+    bassFilterWetRef.current = null
+    outGainRef.current = null
+    destRef.current = null
+    analyserRef.current = null
+
+    setState((prev) => ({
+      ...prev,
+      isCapturing: false,
+      isRecording: false,
+      waveformData: null,
+    }))
+  }, [])
+
+  const setReverbMix = useCallback((value: number) => {
+    if (dryGainRef.current) dryGainRef.current.gain.value = 1 - value
+    if (wetGainRef.current) wetGainRef.current.gain.value = value
+    setState((prev) => ({ ...prev, reverbMix: value }))
+  }, [])
+
+  const setBassGain = useCallback((value: number) => {
+    setState((prev) => {
+      const effective = prev.bassEnabled ? value : 0
+      if (bassFilterDryRef.current) bassFilterDryRef.current.gain.value = effective
+      if (bassFilterWetRef.current) bassFilterWetRef.current.gain.value = effective
+      return { ...prev, bassGain: value }
+    })
+  }, [])
+
+  const setBassEnabled = useCallback((enabled: boolean) => {
+    setState((prev) => {
+      const effective = enabled ? prev.bassGain : 0
+      if (bassFilterDryRef.current) bassFilterDryRef.current.gain.value = effective
+      if (bassFilterWetRef.current) bassFilterWetRef.current.gain.value = effective
+      return { ...prev, bassEnabled: enabled }
+    })
+  }, [])
+
+  const setSpeed = useCallback((value: number) => {
+    if (playbackAudioRef.current) {
+      playbackAudioRef.current.playbackRate = value
+    }
+    setState((prev) => ({ ...prev, speed: value }))
+  }, [])
+
+  const setPreservePitch = useCallback((value: boolean) => {
+    if (playbackAudioRef.current) {
+      playbackAudioRef.current.preservesPitch = value
+    }
+    setState((prev) => ({ ...prev, preservePitch: value }))
+  }, [])
+
+  const startRecording = useCallback(() => {
+    const dest = destRef.current
+    if (!dest) return
+
+    chunksRef.current = []
+
+    const mimeCandidates = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/ogg;codecs=opus",
+      "audio/ogg",
+    ]
+
+    let mimeType = ""
+    for (const m of mimeCandidates) {
+      if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(m)) {
+        mimeType = m
+        break
+      }
+    }
+
+    const recorder = new MediaRecorder(dest.stream, mimeType ? { mimeType } : undefined)
+
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) chunksRef.current.push(e.data)
+    }
+
+    recorder.onstop = () => {
+      const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" })
+      const url = URL.createObjectURL(blob)
+      setState((prev) => ({
+        ...prev,
+        isRecording: false,
+        recordingBlobUrl: url,
+      }))
+    }
+
+    recorder.start()
+    recorderRef.current = recorder
+    setState((prev) => ({ ...prev, isRecording: true }))
+  }, [])
+
+  const stopRecording = useCallback(() => {
+    if (recorderRef.current && recorderRef.current.state !== "inactive") {
+      recorderRef.current.stop()
+    }
+  }, [])
+
+  const playRecording = useCallback(() => {
+    if (!state.recordingBlobUrl) return
+
+    // Stop capture if still running
+    if (state.isCapturing) {
+      stopAll()
+    }
+
+    const audio = new Audio(state.recordingBlobUrl)
+    audio.playbackRate = state.speed
+    audio.preservesPitch = state.preservePitch
+    playbackAudioRef.current = audio
+
+    // Create a new audio context for analysis of playback
+    const ac = new AudioContext()
+    acRef.current = ac
+    const source = ac.createMediaElementSource(audio)
+    const analyser = ac.createAnalyser()
+    analyser.fftSize = 2048
+    source.connect(analyser)
+    analyser.connect(ac.destination)
+    analyserRef.current = analyser
+
+    audio.play()
+    setState((prev) => ({ ...prev, isPlayingBack: true }))
+
+    const updateWaveformPlayback = () => {
+      if (!analyserRef.current) return
+      const bufferLength = analyserRef.current.frequencyBinCount
+      const dataArray = new Float32Array(bufferLength)
+      analyserRef.current.getFloatTimeDomainData(dataArray)
+      setState((prev) => ({ ...prev, waveformData: new Float32Array(dataArray) }))
+      animFrameRef.current = requestAnimationFrame(updateWaveformPlayback)
+    }
+    updateWaveformPlayback()
+
+    audio.onended = () => {
+      cancelAnimationFrame(animFrameRef.current)
+      if (ac) ac.close().catch(() => {})
+      acRef.current = null
+      analyserRef.current = null
+      playbackAudioRef.current = null
+      setState((prev) => ({ ...prev, isPlayingBack: false, waveformData: null }))
+    }
+  }, [state.recordingBlobUrl, state.isCapturing, state.speed, state.preservePitch, stopAll])
+
+  const stopPlayback = useCallback(() => {
+    cancelAnimationFrame(animFrameRef.current)
+    if (playbackAudioRef.current) {
+      playbackAudioRef.current.pause()
+      playbackAudioRef.current = null
+    }
+    if (acRef.current) {
+      acRef.current.close().catch(() => {})
+      acRef.current = null
+    }
+    analyserRef.current = null
+    setState((prev) => ({ ...prev, isPlayingBack: false, waveformData: null }))
+  }, [])
+
+  const setImpulse = useCallback((type: "small" | "large") => {
+    const ac = acRef.current
+    const convolver = convolverRef.current
+    if (!ac || !convolver) return
+    if (type === "small") {
+      convolver.buffer = makeImpulseResponse(ac, 1.0, 2.0)
+    } else {
+      convolver.buffer = makeImpulseResponse(ac, 3.2, 3.5)
+    }
+  }, [])
+
+  return {
+    state,
+    startCapture,
+    stopAll,
+    setReverbMix,
+    setBassGain,
+    setBassEnabled,
+    setSpeed,
+    setPreservePitch,
+    startRecording,
+    stopRecording,
+    playRecording,
+    stopPlayback,
+    setImpulse,
+  }
+}

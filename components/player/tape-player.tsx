@@ -1,0 +1,326 @@
+"use client"
+
+import { useAudioEngine } from "@/hooks/use-audio-engine"
+import { RotaryDial } from "./rotary-dial"
+import { WaveformDisplay } from "./waveform-display"
+import { TapeReels } from "./tape-reels"
+import { RecordingLED } from "./recording-led"
+import { PlayerButton } from "./player-button"
+
+export function TapePlayer() {
+  const {
+    state,
+    startCapture,
+    stopAll,
+    setReverbMix,
+    setBassGain,
+    setBassEnabled,
+    setSpeed,
+    setPreservePitch,
+    startRecording,
+    stopRecording,
+    playRecording,
+    stopPlayback,
+    setImpulse,
+  } = useAudioEngine()
+
+  const handleStartCapture = async () => {
+    try {
+      await startCapture()
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-6">
+      {/* Main player chassis */}
+      <div
+        className="relative w-full max-w-[600px] rounded-xl overflow-hidden"
+        style={{
+          background: "linear-gradient(180deg, #2a2a32 0%, #1a1a22 40%, #161620 100%)",
+          border: "1px solid #3a3a44",
+          boxShadow:
+            "0 20px 60px rgba(0,0,0,0.6), 0 2px 0 rgba(255,255,255,0.03) inset, 0 -1px 0 rgba(0,0,0,0.8)",
+        }}
+      >
+        {/* Top bezel with brushed metal effect */}
+        <div
+          className="relative flex items-center justify-between px-5 py-3"
+          style={{
+            background: "linear-gradient(180deg, #333340, #2a2a35)",
+            borderBottom: "1px solid #444",
+            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06)",
+          }}
+        >
+          {/* Brand label */}
+          <div className="flex items-center gap-3">
+            <span
+              className="font-mono text-sm font-bold tracking-[0.3em] uppercase"
+              style={{ color: "#c8a050" }}
+            >
+              TAPELAB
+            </span>
+            <span
+              className="font-mono text-[8px] tracking-[0.2em] uppercase"
+              style={{ color: "#666" }}
+            >
+              PRO-1000
+            </span>
+          </div>
+
+          {/* Recording LED on top right */}
+          <RecordingLED isRecording={state.isRecording} />
+        </div>
+
+        {/* Tape reels section with glass window */}
+        <div className="px-5 pt-4">
+          <TapeReels
+            isPlaying={state.isCapturing || state.isPlayingBack}
+            isReversing={!state.isCapturing && !state.isPlayingBack && !!state.recordingBlobUrl}
+          />
+        </div>
+
+        {/* Waveform display */}
+        <div className="px-5 pt-4">
+          <WaveformDisplay
+            waveformData={state.waveformData}
+            isActive={state.isCapturing || state.isPlayingBack}
+          />
+        </div>
+
+        {/* Dials section */}
+        <div
+          className="flex items-start justify-center gap-8 px-5 pt-5 pb-3"
+          style={{
+            borderTop: "1px solid #2a2a30",
+          }}
+        >
+          <RotaryDial
+            label="Reverb"
+            value={state.reverbMix}
+            min={0}
+            max={1}
+            step={0.01}
+            onChange={setReverbMix}
+            disabled={!state.isCapturing}
+            color="#e85d3a"
+          />
+
+          <div className="flex flex-col items-center gap-2">
+            <RotaryDial
+              label="Bass"
+              value={state.bassGain}
+              min={0}
+              max={18}
+              step={0.5}
+              onChange={(v) => {
+                setBassGain(v)
+                if (!state.bassEnabled && v > 0) setBassEnabled(true)
+              }}
+              disabled={!state.isCapturing}
+              unit=" dB"
+              color="#c8a050"
+            />
+            <button
+              onClick={() => setBassEnabled(!state.bassEnabled)}
+              disabled={!state.isCapturing}
+              className="font-mono text-[9px] uppercase tracking-[0.15em] px-2 py-0.5 rounded-sm"
+              style={{
+                background: state.bassEnabled ? "#c8a050" : "transparent",
+                color: state.bassEnabled ? "#111" : "#666",
+                border: `1px solid ${state.bassEnabled ? "#c8a050" : "#444"}`,
+                cursor: state.isCapturing ? "pointer" : "not-allowed",
+                opacity: state.isCapturing ? 1 : 0.4,
+                transition: "all 0.15s",
+              }}
+            >
+              {state.bassEnabled ? "On" : "Off"}
+            </button>
+          </div>
+
+          <div className="flex flex-col items-center gap-2">
+            <RotaryDial
+              label="Speed"
+              value={state.speed}
+              min={0.25}
+              max={2}
+              step={0.05}
+              onChange={setSpeed}
+              disabled={!state.isPlayingBack}
+              unit="x"
+              color="#50a0c8"
+            />
+            <button
+              onClick={() => setPreservePitch(!state.preservePitch)}
+              disabled={!state.isPlayingBack}
+              className="font-mono text-[9px] uppercase tracking-[0.15em] px-2 py-0.5 rounded-sm"
+              style={{
+                background: state.preservePitch ? "#50a0c8" : "transparent",
+                color: state.preservePitch ? "#111" : "#666",
+                border: `1px solid ${state.preservePitch ? "#50a0c8" : "#444"}`,
+                cursor: state.isPlayingBack ? "pointer" : "not-allowed",
+                opacity: state.isPlayingBack ? 1 : 0.4,
+                transition: "all 0.15s",
+              }}
+            >
+              Pitch Lock
+            </button>
+          </div>
+        </div>
+
+        {/* Impulse response selector */}
+        <div
+          className="flex items-center justify-center gap-2 px-5 py-2"
+        >
+          <span
+            className="font-mono text-[9px] uppercase tracking-[0.15em] mr-2"
+            style={{ color: "#666" }}
+          >
+            IR:
+          </span>
+          <PlayerButton
+            label="Small Room"
+            onClick={() => setImpulse("small")}
+            disabled={!state.isCapturing}
+          />
+          <PlayerButton
+            label="Large Hall"
+            onClick={() => setImpulse("large")}
+            disabled={!state.isCapturing}
+          />
+        </div>
+
+        {/* Transport controls */}
+        <div
+          className="flex items-center justify-center gap-3 px-5 py-4"
+          style={{
+            background: "linear-gradient(180deg, #1e1e26, #18181f)",
+            borderTop: "1px solid #2a2a30",
+          }}
+        >
+          {!state.isCapturing ? (
+            <PlayerButton
+              label="Capture Tab Audio"
+              onClick={handleStartCapture}
+              variant="accent"
+              icon={
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M8 12h8M12 8v8" />
+                </svg>
+              }
+            />
+          ) : (
+            <>
+              <PlayerButton
+                label="Stop"
+                onClick={stopAll}
+                icon={
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="4" y="4" width="16" height="16" rx="2" />
+                  </svg>
+                }
+              />
+              <PlayerButton
+                label={state.isRecording ? "Stop Rec" : "Record"}
+                onClick={state.isRecording ? stopRecording : startRecording}
+                variant="record"
+                active={state.isRecording}
+                icon={
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                    <circle cx="12" cy="12" r="8" />
+                  </svg>
+                }
+              />
+            </>
+          )}
+
+          {state.recordingBlobUrl && !state.isPlayingBack && (
+            <PlayerButton
+              label="Play Recording"
+              onClick={playRecording}
+              variant="accent"
+              icon={
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M5 3l14 9-14 9V3z" />
+                </svg>
+              }
+            />
+          )}
+
+          {state.isPlayingBack && (
+            <PlayerButton
+              label="Stop Playback"
+              onClick={stopPlayback}
+              variant="accent"
+              active
+              icon={
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="4" y="4" width="16" height="16" rx="2" />
+                </svg>
+              }
+            />
+          )}
+        </div>
+
+        {/* Bottom bezel with screws */}
+        <div
+          className="flex items-center justify-between px-5 py-2"
+          style={{
+            background: "linear-gradient(180deg, #222230, #1a1a24)",
+            borderTop: "1px solid #2a2a30",
+          }}
+        >
+          {/* Decorative screws */}
+          {[0, 1].map((i) => (
+            <div
+              key={i}
+              className="rounded-full"
+              style={{
+                width: 10,
+                height: 10,
+                background: "radial-gradient(circle at 35% 35%, #555, #333)",
+                border: "1px solid #444",
+                boxShadow: "inset 0 -1px 2px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.3)",
+              }}
+            />
+          ))}
+          <span
+            className="font-mono text-[8px] tracking-[0.1em]"
+            style={{ color: "#444" }}
+          >
+            {state.isCapturing
+              ? "CAPTURING..."
+              : state.isPlayingBack
+                ? "PLAYBACK"
+                : state.recordingBlobUrl
+                  ? "READY"
+                  : "IDLE"}
+          </span>
+          {[0, 1].map((i) => (
+            <div
+              key={i + 2}
+              className="rounded-full"
+              style={{
+                width: 10,
+                height: 10,
+                background: "radial-gradient(circle at 35% 35%, #555, #333)",
+                border: "1px solid #444",
+                boxShadow: "inset 0 -1px 2px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.3)",
+              }}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Shadow under the player */}
+      <div
+        className="w-[90%] max-w-[540px] h-4 rounded-[50%] mx-auto -mt-4"
+        style={{
+          background: "radial-gradient(ellipse, rgba(0,0,0,0.4) 0%, transparent 70%)",
+        }}
+      />
+    </div>
+  )
+}
