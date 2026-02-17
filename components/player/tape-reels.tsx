@@ -40,7 +40,7 @@ export function TapeReels({ isPlaying, isReversing }: TapeReelsProps) {
 
   return (
     <div
-      className="relative flex items-center justify-center gap-10 py-4 px-6 rounded-md overflow-hidden"
+      className="relative flex items-center justify-center gap-12 py-5 px-8 rounded-md overflow-hidden"
       style={{
         background: "linear-gradient(180deg, rgba(0,0,0,0.6) 0%, rgba(10,10,15,0.8) 100%)",
         border: "1px solid #333",
@@ -57,7 +57,7 @@ export function TapeReels({ isPlaying, isReversing }: TapeReelsProps) {
       />
 
       {/* Left reel */}
-      <div className="relative" style={{ width: 72, height: 72 }}>
+      <div className="relative" style={{ width: 88, height: 88 }}>
         <div
           className="w-full h-full rounded-full"
           style={{
@@ -87,8 +87,8 @@ export function TapeReels({ isPlaying, isReversing }: TapeReelsProps) {
           <div
             className="absolute rounded-full"
             style={{
-              width: 16,
-              height: 16,
+              width: 20,
+              height: 20,
               background: "radial-gradient(circle at 40% 40%, #444, #222)",
               border: "1px solid #555",
               left: "50%",
@@ -103,7 +103,7 @@ export function TapeReels({ isPlaying, isReversing }: TapeReelsProps) {
       <div className="flex flex-col items-center gap-1">
         <div
           style={{
-            width: 60,
+            width: 70,
             height: 3,
             background: isPlaying || isReversing ? "#4a3025" : "#2a1a15",
             borderRadius: 2,
@@ -112,14 +112,14 @@ export function TapeReels({ isPlaying, isReversing }: TapeReelsProps) {
           }}
         />
         <span
-          className="text-[8px] font-mono uppercase tracking-[0.15em]"
+          className="text-[9px] font-mono uppercase tracking-[0.15em]"
           style={{ color: "#555" }}
         >
           {isReversing ? "REWIND" : isPlaying ? "PLAY" : "STOP"}
         </span>
         <div
           style={{
-            width: 60,
+            width: 70,
             height: 3,
             background: isPlaying || isReversing ? "#4a3025" : "#2a1a15",
             borderRadius: 2,
@@ -130,7 +130,7 @@ export function TapeReels({ isPlaying, isReversing }: TapeReelsProps) {
       </div>
 
       {/* Right reel */}
-      <div className="relative" style={{ width: 72, height: 72 }}>
+      <div className="relative" style={{ width: 88, height: 88 }}>
         <div
           className="w-full h-full rounded-full"
           style={{
@@ -158,8 +158,8 @@ export function TapeReels({ isPlaying, isReversing }: TapeReelsProps) {
           <div
             className="absolute rounded-full"
             style={{
-              width: 16,
-              height: 16,
+              width: 20,
+              height: 20,
               background: "radial-gradient(circle at 40% 40%, #444, #222)",
               border: "1px solid #555",
               left: "50%",
