@@ -14,6 +14,14 @@ interface RotaryDialProps {
   color?: string
 }
 
+function angleFromCenter(cx: number, cy: number, px: number, py: number) {
+  // Returns angle in degrees, 0 = top, clockwise positive
+  const rad = Math.atan2(px - cx, -(py - cy))
+  let deg = rad * (180 / Math.PI)
+  if (deg < 0) deg += 360
+  return deg
+}
+
 export function RotaryDial({
   label,
   value,
@@ -27,36 +35,65 @@ export function RotaryDial({
 }: RotaryDialProps) {
   const dialRef = useRef<HTMLDivElement>(null)
   const [isDragging, setIsDragging] = useState(false)
-  const startYRef = useRef(0)
-  const startValueRef = useRef(0)
+  const lastAngleRef = useRef(0)
 
   const normalizedValue = (value - min) / (max - min)
-  const rotation = -135 + normalizedValue * 270 // -135 to +135 degrees
+  // Dial range: -135 deg (min) to +135 deg (max), total 270 degrees
+  const rotation = -135 + normalizedValue * 270
+
+  const getCenterOfDial = useCallback(() => {
+    if (!dialRef.current) return { cx: 0, cy: 0 }
+    const rect = dialRef.current.getBoundingClientRect()
+    return { cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2 }
+  }, [])
+
+  // Map a pointer angle (0-360, 0=top, clockwise) to a dial value
+  // Dial min is at angle 225 (bottom-left, -135 from top)
+  // Dial max is at angle 135 (bottom-right, +135 from top)
+  // Dead zone is between 135 and 225 (the bottom 90 degrees)
+  const angleToValue = useCallback(
+    (angleDeg: number) => {
+      // Map: 225 = min (0.0), 360/0 = mid (0.5 roughly), 135 = max (1.0)
+      // Remap so that 225 = 0 and going clockwise through 360/0 to 135 = 270
+      let mapped = angleDeg - 225
+      if (mapped < 0) mapped += 360
+      // mapped: 0 = min, 270 = max, 270-360 = dead zone
+      if (mapped > 270) {
+        // In the dead zone - clamp to nearest edge
+        return mapped > 315 ? min : max
+      }
+      const norm = mapped / 270
+      let newVal = min + norm * (max - min)
+      newVal = Math.round(newVal / step) * step
+      return Math.max(min, Math.min(max, newVal))
+    },
+    [min, max, step]
+  )
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
       if (disabled) return
       e.preventDefault()
       setIsDragging(true)
-      startYRef.current = e.clientY
-      startValueRef.current = value
       ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+
+      const { cx, cy } = getCenterOfDial()
+      const angle = angleFromCenter(cx, cy, e.clientX, e.clientY)
+      lastAngleRef.current = angle
+      onChange(angleToValue(angle))
     },
-    [disabled, value]
+    [disabled, getCenterOfDial, angleToValue, onChange]
   )
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
       if (!isDragging || disabled) return
-      const delta = startYRef.current - e.clientY
-      const range = max - min
-      const sensitivity = 200
-      let newValue = startValueRef.current + (delta / sensitivity) * range
-      newValue = Math.round(newValue / step) * step
-      newValue = Math.max(min, Math.min(max, newValue))
-      onChange(newValue)
+      const { cx, cy } = getCenterOfDial()
+      const angle = angleFromCenter(cx, cy, e.clientX, e.clientY)
+      lastAngleRef.current = angle
+      onChange(angleToValue(angle))
     },
-    [isDragging, disabled, min, max, step, onChange]
+    [isDragging, disabled, getCenterOfDial, angleToValue, onChange]
   )
 
   const handlePointerUp = useCallback(() => {
@@ -65,7 +102,7 @@ export function RotaryDial({
 
   // Tick marks around the dial
   const ticks = Array.from({ length: 11 }, (_, i) => {
-    const angle = -135 + i * 27 // 270 / 10
+    const angle = -135 + i * 27
     return angle
   })
 
@@ -98,7 +135,7 @@ export function RotaryDial({
           />
         ))}
 
-        {/* Outer ring */}
+        {/* Outer ring / knob */}
         <div
           ref={dialRef}
           onPointerDown={handlePointerDown}

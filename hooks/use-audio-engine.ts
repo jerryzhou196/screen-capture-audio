@@ -2,6 +2,13 @@
 
 import { useCallback, useRef, useState } from "react"
 
+export type Recording = {
+  id: string
+  blobUrl: string
+  name: string
+  createdAt: number
+}
+
 export type AudioEngineState = {
   isCapturing: boolean
   isRecording: boolean
@@ -12,7 +19,8 @@ export type AudioEngineState = {
   speed: number
   preservePitch: boolean
   waveformData: Float32Array | null
-  recordingBlobUrl: string | null
+  recordings: Recording[]
+  activeRecordingId: string | null
 }
 
 export function useAudioEngine() {
@@ -26,7 +34,8 @@ export function useAudioEngine() {
     speed: 1,
     preservePitch: true,
     waveformData: null,
-    recordingBlobUrl: null,
+    recordings: [],
+    activeRecordingId: null,
   })
 
   const acRef = useRef<AudioContext | null>(null)
@@ -45,6 +54,11 @@ export function useAudioEngine() {
   const analyserRef = useRef<AnalyserNode | null>(null)
   const animFrameRef = useRef<number>(0)
   const playbackAudioRef = useRef<HTMLAudioElement | null>(null)
+
+  // Store current state values in refs so playback graph can read them
+  const reverbMixRef = useRef(0.35)
+  const bassGainValRef = useRef(8)
+  const bassEnabledRef = useRef(false)
 
   function makeImpulseResponse(ac: AudioContext, seconds: number, decay: number) {
     const rate = ac.sampleRate
@@ -117,7 +131,6 @@ export function useAudioEngine() {
     const bassFilterDry = makeBassFilter(ac)
     const bassFilterWet = makeBassFilter(ac)
 
-    // Analyser for waveform
     const analyser = ac.createAnalyser()
     analyser.fftSize = 2048
 
@@ -128,7 +141,6 @@ export function useAudioEngine() {
     wetGain.connect(bassFilterWet)
     bassFilterDry.connect(outGain)
     bassFilterWet.connect(outGain)
-
     outGain.connect(analyser)
 
     const dest = ac.createMediaStreamDestination()
@@ -143,18 +155,20 @@ export function useAudioEngine() {
     destRef.current = dest
     analyserRef.current = analyser
 
-    // Create hidden audio element for monitor
     const monitor = new Audio()
     monitor.srcObject = dest.stream
     monitor.play().catch(() => {})
     monitorRef.current = monitor
 
     // Apply initial state
-    const wet = 0.35
+    const wet = reverbMixRef.current
     dryGain.gain.value = 1 - wet
     wetGain.gain.value = wet
 
-    // Listen for track end
+    const effectiveBass = bassEnabledRef.current ? bassGainValRef.current : 0
+    bassFilterDry.gain.value = effectiveBass
+    bassFilterWet.gain.value = effectiveBass
+
     audioTracks[0].addEventListener("ended", () => {
       stopAll()
     })
@@ -205,12 +219,14 @@ export function useAudioEngine() {
   }, [])
 
   const setReverbMix = useCallback((value: number) => {
+    reverbMixRef.current = value
     if (dryGainRef.current) dryGainRef.current.gain.value = 1 - value
     if (wetGainRef.current) wetGainRef.current.gain.value = value
     setState((prev) => ({ ...prev, reverbMix: value }))
   }, [])
 
   const setBassGain = useCallback((value: number) => {
+    bassGainValRef.current = value
     setState((prev) => {
       const effective = prev.bassEnabled ? value : 0
       if (bassFilterDryRef.current) bassFilterDryRef.current.gain.value = effective
@@ -220,6 +236,7 @@ export function useAudioEngine() {
   }, [])
 
   const setBassEnabled = useCallback((enabled: boolean) => {
+    bassEnabledRef.current = enabled
     setState((prev) => {
       const effective = enabled ? prev.bassGain : 0
       if (bassFilterDryRef.current) bassFilterDryRef.current.gain.value = effective
@@ -272,10 +289,17 @@ export function useAudioEngine() {
     recorder.onstop = () => {
       const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" })
       const url = URL.createObjectURL(blob)
+      const newRecording: Recording = {
+        id: crypto.randomUUID(),
+        blobUrl: url,
+        name: `Recording ${Date.now()}`,
+        createdAt: Date.now(),
+      }
       setState((prev) => ({
         ...prev,
         isRecording: false,
-        recordingBlobUrl: url,
+        recordings: [...prev.recordings, newRecording],
+        activeRecordingId: newRecording.id,
       }))
     }
 
@@ -290,31 +314,82 @@ export function useAudioEngine() {
     }
   }, [])
 
-  const playRecording = useCallback(() => {
-    if (!state.recordingBlobUrl) return
+  const playRecording = useCallback((recordingId?: string) => {
+    const targetId = recordingId || state.activeRecordingId
+    const recording = state.recordings.find((r) => r.id === targetId)
+    if (!recording) return
 
     // Stop capture if still running
     if (state.isCapturing) {
       stopAll()
     }
 
-    const audio = new Audio(state.recordingBlobUrl)
+    // Stop any current playback
+    if (playbackAudioRef.current) {
+      playbackAudioRef.current.pause()
+      playbackAudioRef.current = null
+    }
+    if (acRef.current) {
+      acRef.current.close().catch(() => {})
+      acRef.current = null
+    }
+    cancelAnimationFrame(animFrameRef.current)
+
+    const audio = new Audio(recording.blobUrl)
     audio.playbackRate = state.speed
     audio.preservesPitch = state.preservePitch
     playbackAudioRef.current = audio
 
-    // Create a new audio context for analysis of playback
+    // Create a full audio graph for playback with reverb + bass
     const ac = new AudioContext()
     acRef.current = ac
     const source = ac.createMediaElementSource(audio)
+
+    // Build the same convolver + bass filter graph
+    const convolver = ac.createConvolver()
+    const dryGain = ac.createGain()
+    const wetGain = ac.createGain()
+    const outGain = ac.createGain()
+    outGain.gain.value = 0.85
+
+    convolver.buffer = makeImpulseResponse(ac, 1.6, 2.2)
+
+    const bassFilterDry = makeBassFilter(ac)
+    const bassFilterWet = makeBassFilter(ac)
+
     const analyser = ac.createAnalyser()
     analyser.fftSize = 2048
-    source.connect(analyser)
+
+    // Wire the graph: source -> dry/wet split -> bass filters -> outGain -> analyser -> destination
+    source.connect(dryGain)
+    source.connect(convolver)
+    convolver.connect(wetGain)
+    dryGain.connect(bassFilterDry)
+    wetGain.connect(bassFilterWet)
+    bassFilterDry.connect(outGain)
+    bassFilterWet.connect(outGain)
+    outGain.connect(analyser)
     analyser.connect(ac.destination)
+
+    // Store refs so dials work during playback
+    convolverRef.current = convolver
+    dryGainRef.current = dryGain
+    wetGainRef.current = wetGain
+    bassFilterDryRef.current = bassFilterDry
+    bassFilterWetRef.current = bassFilterWet
+    outGainRef.current = outGain
     analyserRef.current = analyser
 
+    // Apply current reverb/bass state to the playback graph
+    const wet = reverbMixRef.current
+    dryGain.gain.value = 1 - wet
+    wetGain.gain.value = wet
+    const effectiveBass = bassEnabledRef.current ? bassGainValRef.current : 0
+    bassFilterDry.gain.value = effectiveBass
+    bassFilterWet.gain.value = effectiveBass
+
     audio.play()
-    setState((prev) => ({ ...prev, isPlayingBack: true }))
+    setState((prev) => ({ ...prev, isPlayingBack: true, activeRecordingId: recording.id }))
 
     const updateWaveformPlayback = () => {
       if (!analyserRef.current) return
@@ -331,10 +406,16 @@ export function useAudioEngine() {
       if (ac) ac.close().catch(() => {})
       acRef.current = null
       analyserRef.current = null
+      convolverRef.current = null
+      dryGainRef.current = null
+      wetGainRef.current = null
+      bassFilterDryRef.current = null
+      bassFilterWetRef.current = null
+      outGainRef.current = null
       playbackAudioRef.current = null
       setState((prev) => ({ ...prev, isPlayingBack: false, waveformData: null }))
     }
-  }, [state.recordingBlobUrl, state.isCapturing, state.speed, state.preservePitch, stopAll])
+  }, [state.recordings, state.activeRecordingId, state.isCapturing, state.speed, state.preservePitch, stopAll])
 
   const stopPlayback = useCallback(() => {
     cancelAnimationFrame(animFrameRef.current)
@@ -347,6 +428,12 @@ export function useAudioEngine() {
       acRef.current = null
     }
     analyserRef.current = null
+    convolverRef.current = null
+    dryGainRef.current = null
+    wetGainRef.current = null
+    bassFilterDryRef.current = null
+    bassFilterWetRef.current = null
+    outGainRef.current = null
     setState((prev) => ({ ...prev, isPlayingBack: false, waveformData: null }))
   }, [])
 
@@ -359,6 +446,22 @@ export function useAudioEngine() {
     } else {
       convolver.buffer = makeImpulseResponse(ac, 3.2, 3.5)
     }
+  }, [])
+
+  const downloadRecording = useCallback((recordingId?: string) => {
+    const targetId = recordingId || state.activeRecordingId
+    const recording = state.recordings.find((r) => r.id === targetId)
+    if (!recording) return
+    const a = document.createElement("a")
+    a.href = recording.blobUrl
+    a.download = `slowedrvb-${recording.id.slice(0, 8)}.webm`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  }, [state.recordings, state.activeRecordingId])
+
+  const selectRecording = useCallback((recordingId: string) => {
+    setState((prev) => ({ ...prev, activeRecordingId: recordingId }))
   }, [])
 
   return {
@@ -375,5 +478,7 @@ export function useAudioEngine() {
     playRecording,
     stopPlayback,
     setImpulse,
+    downloadRecording,
+    selectRecording,
   }
 }

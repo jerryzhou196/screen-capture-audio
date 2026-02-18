@@ -6,6 +6,7 @@ import { WaveformDisplay } from "./waveform-display"
 import { TapeReels } from "./tape-reels"
 import { RecordingLED } from "./recording-led"
 import { PlayerButton } from "./player-button"
+import { CassetteSidebar } from "./cassette-sidebar"
 
 export function TapePlayer() {
   const {
@@ -22,6 +23,8 @@ export function TapePlayer() {
     playRecording,
     stopPlayback,
     setImpulse,
+    downloadRecording,
+    selectRecording,
   } = useAudioEngine()
 
   const handleStartCapture = async () => {
@@ -32,40 +35,50 @@ export function TapePlayer() {
     }
   }
 
+  const audioActive = state.isCapturing || state.isPlayingBack
+  const hasRecordings = state.recordings.length > 0
+  const activeRecording = state.recordings.find((r) => r.id === state.activeRecordingId)
+
   return (
-    <div className="flex flex-col items-center gap-6">
+    <div className="flex items-start justify-center gap-6">
       {/* Main player chassis */}
       <div
-        className="relative w-full max-w-[600px] rounded-xl overflow-hidden"
+        className="relative w-full max-w-[720px] rounded-2xl overflow-hidden shrink-0"
         style={{
           background: "linear-gradient(180deg, #2a2a32 0%, #1a1a22 40%, #161620 100%)",
           border: "1px solid #3a3a44",
           boxShadow:
-            "0 20px 60px rgba(0,0,0,0.6), 0 2px 0 rgba(255,255,255,0.03) inset, 0 -1px 0 rgba(0,0,0,0.8)",
+            "0 24px 80px rgba(0,0,0,0.6), 0 2px 0 rgba(255,255,255,0.03) inset, 0 -1px 0 rgba(0,0,0,0.8)",
         }}
       >
         {/* Top bezel with brushed metal effect */}
         <div
-          className="relative flex items-center justify-between px-5 py-3"
+          className="relative flex items-center justify-between px-6 py-4"
           style={{
             background: "linear-gradient(180deg, #333340, #2a2a35)",
             borderBottom: "1px solid #444",
             boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06)",
           }}
         >
-          {/* Brand label */}
-          <div className="flex items-center gap-3">
+          {/* Status indicator */}
+          <div className="flex items-center gap-2">
+            <div
+              className="w-2 h-2 rounded-full"
+              style={{
+                background: state.isCapturing ? "#4ade80" : state.isPlayingBack ? "#c8a050" : "#444",
+                boxShadow: state.isCapturing
+                  ? "0 0 8px rgba(74,222,128,0.5)"
+                  : state.isPlayingBack
+                    ? "0 0 8px rgba(200,160,80,0.4)"
+                    : "none",
+                transition: "all 0.3s",
+              }}
+            />
             <span
-              className="font-mono text-sm font-bold tracking-[0.3em] uppercase"
-              style={{ color: "#c8a050" }}
+              className="font-mono text-[10px] uppercase tracking-[0.2em]"
+              style={{ color: "#555" }}
             >
-              TAPELAB
-            </span>
-            <span
-              className="font-mono text-[8px] tracking-[0.2em] uppercase"
-              style={{ color: "#666" }}
-            >
-              PRO-1000
+              {state.isCapturing ? "Live" : state.isPlayingBack ? "Playback" : "Ready"}
             </span>
           </div>
 
@@ -74,15 +87,15 @@ export function TapePlayer() {
         </div>
 
         {/* Tape reels section with glass window */}
-        <div className="px-5 pt-4">
+        <div className="px-6 pt-5">
           <TapeReels
             isPlaying={state.isCapturing || state.isPlayingBack}
-            isReversing={!state.isCapturing && !state.isPlayingBack && !!state.recordingBlobUrl}
+            isReversing={!state.isCapturing && !state.isPlayingBack && hasRecordings}
           />
         </div>
 
         {/* Waveform display */}
-        <div className="px-5 pt-4">
+        <div className="px-6 pt-5">
           <WaveformDisplay
             waveformData={state.waveformData}
             isActive={state.isCapturing || state.isPlayingBack}
@@ -91,7 +104,7 @@ export function TapePlayer() {
 
         {/* Dials section */}
         <div
-          className="flex items-start justify-center gap-8 px-5 pt-5 pb-3"
+          className="flex items-start justify-center gap-10 px-6 pt-6 pb-4"
           style={{
             borderTop: "1px solid #2a2a30",
           }}
@@ -103,7 +116,7 @@ export function TapePlayer() {
             max={1}
             step={0.01}
             onChange={setReverbMix}
-            disabled={!state.isCapturing}
+            disabled={!audioActive}
             color="#e85d3a"
           />
 
@@ -118,20 +131,20 @@ export function TapePlayer() {
                 setBassGain(v)
                 if (!state.bassEnabled && v > 0) setBassEnabled(true)
               }}
-              disabled={!state.isCapturing}
+              disabled={!audioActive}
               unit=" dB"
               color="#c8a050"
             />
             <button
               onClick={() => setBassEnabled(!state.bassEnabled)}
-              disabled={!state.isCapturing}
+              disabled={!audioActive}
               className="font-mono text-[9px] uppercase tracking-[0.15em] px-2 py-0.5 rounded-sm"
               style={{
                 background: state.bassEnabled ? "#c8a050" : "transparent",
                 color: state.bassEnabled ? "#111" : "#666",
                 border: `1px solid ${state.bassEnabled ? "#c8a050" : "#444"}`,
-                cursor: state.isCapturing ? "pointer" : "not-allowed",
-                opacity: state.isCapturing ? 1 : 0.4,
+                cursor: audioActive ? "pointer" : "not-allowed",
+                opacity: audioActive ? 1 : 0.4,
                 transition: "all 0.15s",
               }}
             >
@@ -170,9 +183,7 @@ export function TapePlayer() {
         </div>
 
         {/* Impulse response selector */}
-        <div
-          className="flex items-center justify-center gap-2 px-5 py-2"
-        >
+        <div className="flex items-center justify-center gap-2 px-6 py-2">
           <span
             className="font-mono text-[9px] uppercase tracking-[0.15em] mr-2"
             style={{ color: "#666" }}
@@ -182,35 +193,41 @@ export function TapePlayer() {
           <PlayerButton
             label="Small Room"
             onClick={() => setImpulse("small")}
-            disabled={!state.isCapturing}
+            disabled={!audioActive}
           />
           <PlayerButton
             label="Large Hall"
             onClick={() => setImpulse("large")}
-            disabled={!state.isCapturing}
+            disabled={!audioActive}
           />
         </div>
 
         {/* Transport controls */}
         <div
-          className="flex items-center justify-center gap-3 px-5 py-4"
+          className="flex items-center justify-center gap-3 px-6 py-5"
           style={{
             background: "linear-gradient(180deg, #1e1e26, #18181f)",
             borderTop: "1px solid #2a2a30",
           }}
         >
           {!state.isCapturing ? (
-            <PlayerButton
-              label="Capture Tab Audio"
+            <button
               onClick={handleStartCapture}
-              variant="accent"
-              icon={
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" />
-                  <path d="M8 12h8M12 8v8" />
-                </svg>
-              }
-            />
+              className="capture-btn relative flex items-center gap-2 px-5 py-2.5 rounded-md font-mono text-[11px] uppercase tracking-[0.15em] select-none transition-transform active:scale-95"
+              style={{
+                background: "linear-gradient(180deg, #c8a050, #a07830)",
+                color: "#111",
+                fontWeight: 700,
+                border: "1px solid #dab060",
+                boxShadow: "0 0 20px rgba(200,160,80,0.3), 0 4px 12px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.2)",
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M8 12h8M12 8v8" />
+              </svg>
+              Capture Tab Audio
+            </button>
           ) : (
             <>
               <PlayerButton
@@ -236,10 +253,10 @@ export function TapePlayer() {
             </>
           )}
 
-          {state.recordingBlobUrl && !state.isPlayingBack && (
+          {activeRecording && !state.isPlayingBack && !state.isCapturing && (
             <PlayerButton
               label="Play Recording"
-              onClick={playRecording}
+              onClick={() => playRecording(state.activeRecordingId ?? undefined)}
               variant="accent"
               icon={
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
@@ -262,24 +279,38 @@ export function TapePlayer() {
               }
             />
           )}
+
+          {/* Download button */}
+          {activeRecording && (
+            <PlayerButton
+              label="Download"
+              onClick={() => downloadRecording(state.activeRecordingId ?? undefined)}
+              icon={
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+              }
+            />
+          )}
         </div>
 
         {/* Bottom bezel with screws */}
         <div
-          className="flex items-center justify-between px-5 py-2"
+          className="flex items-center justify-between px-6 py-3"
           style={{
             background: "linear-gradient(180deg, #222230, #1a1a24)",
             borderTop: "1px solid #2a2a30",
           }}
         >
-          {/* Decorative screws */}
           {[0, 1].map((i) => (
             <div
               key={i}
               className="rounded-full"
               style={{
-                width: 10,
-                height: 10,
+                width: 12,
+                height: 12,
                 background: "radial-gradient(circle at 35% 35%, #555, #333)",
                 border: "1px solid #444",
                 boxShadow: "inset 0 -1px 2px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.3)",
@@ -287,14 +318,14 @@ export function TapePlayer() {
             />
           ))}
           <span
-            className="font-mono text-[8px] tracking-[0.1em]"
+            className="font-mono text-[9px] tracking-[0.1em]"
             style={{ color: "#444" }}
           >
             {state.isCapturing
               ? "CAPTURING..."
               : state.isPlayingBack
                 ? "PLAYBACK"
-                : state.recordingBlobUrl
+                : hasRecordings
                   ? "READY"
                   : "IDLE"}
           </span>
@@ -303,8 +334,8 @@ export function TapePlayer() {
               key={i + 2}
               className="rounded-full"
               style={{
-                width: 10,
-                height: 10,
+                width: 12,
+                height: 12,
                 background: "radial-gradient(circle at 35% 35%, #555, #333)",
                 border: "1px solid #444",
                 boxShadow: "inset 0 -1px 2px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.3)",
@@ -314,12 +345,14 @@ export function TapePlayer() {
         </div>
       </div>
 
-      {/* Shadow under the player */}
-      <div
-        className="w-[90%] max-w-[540px] h-4 rounded-[50%] mx-auto -mt-4"
-        style={{
-          background: "radial-gradient(ellipse, rgba(0,0,0,0.4) 0%, transparent 70%)",
-        }}
+      {/* Cassette sidebar - slides in when recordings exist */}
+      <CassetteSidebar
+        recordings={state.recordings}
+        activeRecordingId={state.activeRecordingId}
+        isPlayingBack={state.isPlayingBack}
+        onSelect={selectRecording}
+        onPlay={(id) => playRecording(id)}
+        onDownload={(id) => downloadRecording(id)}
       />
     </div>
   )
