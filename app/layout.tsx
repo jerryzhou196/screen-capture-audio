@@ -7,7 +7,7 @@ const _spaceMono = Space_Mono({ weight: ['400', '700'], subsets: ['latin'] })
 const _inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'TAPELAB - Skeuomorphic Audio Processor',
+  title: 'slowedrvb - Audio Capture & Effects',
   description: 'A vintage-inspired skeuomorphic 3D tape player with reverb, bass boost, waveform visualization, and screen audio capture.',
   generator: 'v0.app',
   icons: {

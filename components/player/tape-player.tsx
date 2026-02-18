@@ -60,19 +60,25 @@ export function TapePlayer() {
             boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06)",
           }}
         >
-          {/* Brand label */}
-          <div className="flex items-center gap-3">
+          {/* Status indicator */}
+          <div className="flex items-center gap-2">
+            <div
+              className="w-2 h-2 rounded-full"
+              style={{
+                background: state.isCapturing ? "#4ade80" : state.isPlayingBack ? "#c8a050" : "#444",
+                boxShadow: state.isCapturing
+                  ? "0 0 8px rgba(74,222,128,0.5)"
+                  : state.isPlayingBack
+                    ? "0 0 8px rgba(200,160,80,0.4)"
+                    : "none",
+                transition: "all 0.3s",
+              }}
+            />
             <span
-              className="font-mono text-base font-bold tracking-[0.3em] uppercase"
-              style={{ color: "#c8a050" }}
+              className="font-mono text-[10px] uppercase tracking-[0.2em]"
+              style={{ color: "#555" }}
             >
-              TAPELAB
-            </span>
-            <span
-              className="font-mono text-[9px] tracking-[0.2em] uppercase"
-              style={{ color: "#666" }}
-            >
-              PRO-1000
+              {state.isCapturing ? "Live" : state.isPlayingBack ? "Playback" : "Ready"}
             </span>
           </div>
 
@@ -205,17 +211,23 @@ export function TapePlayer() {
           }}
         >
           {!state.isCapturing ? (
-            <PlayerButton
-              label="Capture Tab Audio"
+            <button
               onClick={handleStartCapture}
-              variant="accent"
-              icon={
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" />
-                  <path d="M8 12h8M12 8v8" />
-                </svg>
-              }
-            />
+              className="capture-btn relative flex items-center gap-2 px-5 py-2.5 rounded-md font-mono text-[11px] uppercase tracking-[0.15em] select-none transition-transform active:scale-95"
+              style={{
+                background: "linear-gradient(180deg, #c8a050, #a07830)",
+                color: "#111",
+                fontWeight: 700,
+                border: "1px solid #dab060",
+                boxShadow: "0 0 20px rgba(200,160,80,0.3), 0 4px 12px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.2)",
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M8 12h8M12 8v8" />
+              </svg>
+              Capture Tab Audio
+            </button>
           ) : (
             <>
               <PlayerButton
