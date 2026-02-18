@@ -6,6 +6,7 @@ import { WaveformDisplay } from "./waveform-display"
 import { TapeReels } from "./tape-reels"
 import { RecordingLED } from "./recording-led"
 import { PlayerButton } from "./player-button"
+import { CassetteSidebar } from "./cassette-sidebar"
 
 export function TapePlayer() {
   const {
@@ -23,6 +24,7 @@ export function TapePlayer() {
     stopPlayback,
     setImpulse,
     downloadRecording,
+    selectRecording,
   } = useAudioEngine()
 
   const handleStartCapture = async () => {
@@ -34,12 +36,14 @@ export function TapePlayer() {
   }
 
   const audioActive = state.isCapturing || state.isPlayingBack
+  const hasRecordings = state.recordings.length > 0
+  const activeRecording = state.recordings.find((r) => r.id === state.activeRecordingId)
 
   return (
-    <div className="flex flex-col items-center gap-8">
+    <div className="flex items-start justify-center gap-6">
       {/* Main player chassis */}
       <div
-        className="relative w-full max-w-[720px] rounded-2xl overflow-hidden"
+        className="relative w-full max-w-[720px] rounded-2xl overflow-hidden shrink-0"
         style={{
           background: "linear-gradient(180deg, #2a2a32 0%, #1a1a22 40%, #161620 100%)",
           border: "1px solid #3a3a44",
@@ -80,7 +84,7 @@ export function TapePlayer() {
         <div className="px-6 pt-5">
           <TapeReels
             isPlaying={state.isCapturing || state.isPlayingBack}
-            isReversing={!state.isCapturing && !state.isPlayingBack && !!state.recordingBlobUrl}
+            isReversing={!state.isCapturing && !state.isPlayingBack && hasRecordings}
           />
         </div>
 
@@ -237,10 +241,10 @@ export function TapePlayer() {
             </>
           )}
 
-          {state.recordingBlobUrl && !state.isPlayingBack && !state.isCapturing && (
+          {activeRecording && !state.isPlayingBack && !state.isCapturing && (
             <PlayerButton
               label="Play Recording"
-              onClick={playRecording}
+              onClick={() => playRecording(state.activeRecordingId ?? undefined)}
               variant="accent"
               icon={
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
@@ -265,10 +269,10 @@ export function TapePlayer() {
           )}
 
           {/* Download button */}
-          {state.recordingBlobUrl && (
+          {activeRecording && (
             <PlayerButton
               label="Download"
-              onClick={downloadRecording}
+              onClick={() => downloadRecording(state.activeRecordingId ?? undefined)}
               icon={
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
@@ -309,7 +313,7 @@ export function TapePlayer() {
               ? "CAPTURING..."
               : state.isPlayingBack
                 ? "PLAYBACK"
-                : state.recordingBlobUrl
+                : hasRecordings
                   ? "READY"
                   : "IDLE"}
           </span>
@@ -329,12 +333,14 @@ export function TapePlayer() {
         </div>
       </div>
 
-      {/* Shadow under the player */}
-      <div
-        className="w-[90%] max-w-[650px] h-5 rounded-[50%] mx-auto -mt-6"
-        style={{
-          background: "radial-gradient(ellipse, rgba(0,0,0,0.4) 0%, transparent 70%)",
-        }}
+      {/* Cassette sidebar - slides in when recordings exist */}
+      <CassetteSidebar
+        recordings={state.recordings}
+        activeRecordingId={state.activeRecordingId}
+        isPlayingBack={state.isPlayingBack}
+        onSelect={selectRecording}
+        onPlay={(id) => playRecording(id)}
+        onDownload={(id) => downloadRecording(id)}
       />
     </div>
   )

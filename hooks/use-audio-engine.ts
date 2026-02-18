@@ -2,6 +2,13 @@
 
 import { useCallback, useRef, useState } from "react"
 
+export type Recording = {
+  id: string
+  blobUrl: string
+  name: string
+  createdAt: number
+}
+
 export type AudioEngineState = {
   isCapturing: boolean
   isRecording: boolean
@@ -12,7 +19,8 @@ export type AudioEngineState = {
   speed: number
   preservePitch: boolean
   waveformData: Float32Array | null
-  recordingBlobUrl: string | null
+  recordings: Recording[]
+  activeRecordingId: string | null
 }
 
 export function useAudioEngine() {
@@ -26,7 +34,8 @@ export function useAudioEngine() {
     speed: 1,
     preservePitch: true,
     waveformData: null,
-    recordingBlobUrl: null,
+    recordings: [],
+    activeRecordingId: null,
   })
 
   const acRef = useRef<AudioContext | null>(null)
@@ -280,10 +289,17 @@ export function useAudioEngine() {
     recorder.onstop = () => {
       const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" })
       const url = URL.createObjectURL(blob)
+      const newRecording: Recording = {
+        id: crypto.randomUUID(),
+        blobUrl: url,
+        name: `Recording ${Date.now()}`,
+        createdAt: Date.now(),
+      }
       setState((prev) => ({
         ...prev,
         isRecording: false,
-        recordingBlobUrl: url,
+        recordings: [...prev.recordings, newRecording],
+        activeRecordingId: newRecording.id,
       }))
     }
 
@@ -298,15 +314,28 @@ export function useAudioEngine() {
     }
   }, [])
 
-  const playRecording = useCallback(() => {
-    if (!state.recordingBlobUrl) return
+  const playRecording = useCallback((recordingId?: string) => {
+    const targetId = recordingId || state.activeRecordingId
+    const recording = state.recordings.find((r) => r.id === targetId)
+    if (!recording) return
 
     // Stop capture if still running
     if (state.isCapturing) {
       stopAll()
     }
 
-    const audio = new Audio(state.recordingBlobUrl)
+    // Stop any current playback
+    if (playbackAudioRef.current) {
+      playbackAudioRef.current.pause()
+      playbackAudioRef.current = null
+    }
+    if (acRef.current) {
+      acRef.current.close().catch(() => {})
+      acRef.current = null
+    }
+    cancelAnimationFrame(animFrameRef.current)
+
+    const audio = new Audio(recording.blobUrl)
     audio.playbackRate = state.speed
     audio.preservesPitch = state.preservePitch
     playbackAudioRef.current = audio
@@ -360,7 +389,7 @@ export function useAudioEngine() {
     bassFilterWet.gain.value = effectiveBass
 
     audio.play()
-    setState((prev) => ({ ...prev, isPlayingBack: true }))
+    setState((prev) => ({ ...prev, isPlayingBack: true, activeRecordingId: recording.id }))
 
     const updateWaveformPlayback = () => {
       if (!analyserRef.current) return
@@ -386,7 +415,7 @@ export function useAudioEngine() {
       playbackAudioRef.current = null
       setState((prev) => ({ ...prev, isPlayingBack: false, waveformData: null }))
     }
-  }, [state.recordingBlobUrl, state.isCapturing, state.speed, state.preservePitch, stopAll])
+  }, [state.recordings, state.activeRecordingId, state.isCapturing, state.speed, state.preservePitch, stopAll])
 
   const stopPlayback = useCallback(() => {
     cancelAnimationFrame(animFrameRef.current)
@@ -419,15 +448,21 @@ export function useAudioEngine() {
     }
   }, [])
 
-  const downloadRecording = useCallback(() => {
-    if (!state.recordingBlobUrl) return
+  const downloadRecording = useCallback((recordingId?: string) => {
+    const targetId = recordingId || state.activeRecordingId
+    const recording = state.recordings.find((r) => r.id === targetId)
+    if (!recording) return
     const a = document.createElement("a")
-    a.href = state.recordingBlobUrl
-    a.download = "slowedrvb-capture.webm"
+    a.href = recording.blobUrl
+    a.download = `slowedrvb-${recording.id.slice(0, 8)}.webm`
     document.body.appendChild(a)
     a.click()
     a.remove()
-  }, [state.recordingBlobUrl])
+  }, [state.recordings, state.activeRecordingId])
+
+  const selectRecording = useCallback((recordingId: string) => {
+    setState((prev) => ({ ...prev, activeRecordingId: recordingId }))
+  }, [])
 
   return {
     state,
@@ -444,5 +479,6 @@ export function useAudioEngine() {
     stopPlayback,
     setImpulse,
     downloadRecording,
+    selectRecording,
   }
 }
